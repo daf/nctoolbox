@@ -174,6 +174,92 @@ classdef ncuvariable < handle
         end % Added to deal with end indexing functionality,
         % otherwise the indexing arugment is ignored.
         
+        function tn = gettimename(src)
+            % NCGEOVARIABLE.gettimename()
+            for i = 1:length(src.axes)
+                tempname = src.axes{i};
+                javaaxisvar  =   src.dataset.netcdf.findVariable(tempname);
+                type{i} = char(javaaxisvar.getAxisType());
+            end
+            match = strcmp('Time', type);
+            tn = src.axes(match);
+        end
+        
+        function tv = gettimevar(src)
+            % NCGEOVARIABLE.gettimevar()
+            tn = src.gettimename();
+            tv = src.dataset.geovariable(tn);
+        end
+        
+        function s = gettimedata(src, start, last, stride)
+            % NCGEOVARIABLE.gettimedata()
+            %             var = src.gettimevar;
+            %             tn = var.data(start, last, stride);
+            %             tn = var.dataset.time(src.gettimename, tn);
+            
+            v = src.gettimevar;
+            sz = src.size();
+            timesize = v.size();
+            timelocation = find(sz==timesize(1));
+            
+            timestart = start(timelocation);
+            timelast = last(timelocation);
+            timestride = stride(timelocation);
+            
+            s = v.data(timestart:timestride:timelast);
+            
+            s = src.dataset.time(v.name, s);
+        end
+        
+        %% These functions would rather output multiple outputs instead of struct, must reconcile
+        %     with the subsref in either ncgeovariable or ncvariable. Wait, why, then, does geoij work???
+        function d = timewindowij(src, varargin)
+            % NCGEOVARIABLE.TIMEWINDOWIJ - Function to get indices from start and stop times for sub-
+            % setting. TODO: There must be a better/fast way to do this using the java library.
+            % Useage: >> timestruct = geovar.timewindowij([2004 1 1 0 0 0], [2005 12 31 0 0 0]);
+            %              >> timestruct = geovar.timewindowij(731947, 732677);
+            % Result: time.time = time data
+            %            time.index = time indices
+            s = src.size;
+            first = ones(1, length(s));
+            last = s;
+            stride = first;
+            g.time = src.gettimedata(first, last, stride);
+            
+            if isfield(g, 'time') % are any of the fields recognized as time explictly
+                if nargin > 2 % If two times are input, do window
+                    starttime = datenum(varargin{1});
+                    stoptime = datenum(varargin{2});
+                    if isempty(starttime)
+                        starttime = g.time(1);
+                    end
+                    if isempty(stoptime)
+                        stoptime = g.time(end);
+                    end
+                    
+                    t_index1 = g.time >= starttime;
+                    t_index2 = g.time <= stoptime;
+                    d.index = find(t_index1==t_index2);
+                    d.time = g.time(d.index);
+                elseif nargin < 3 % If theres only one time, do nearest
+                    neartime = datenum(varargin{1});
+                    diff = abs(g.time-neartime);
+                    ind = find(diff==min(diff));
+                    d.index = ind(1);
+                    d.time = g.time(d.index);
+                    if length(ind) > 1;
+                        warning('NCGEOVARIABLE:TIMEWINDOWIJ',...
+                            ['Multiple time indices determined to be nearest to the supplied time,'...
+                            'only the first index was output.']);
+                    end
+                end
+            else
+                me = MException(['NCTOOLBOX:ncgeovariable:timewindowij'], ...
+                    'No grid variable returned as time.');
+                me.throw;
+            end
+        end % end timewindowij
+        
         function sref = subsref(obj,s)
             switch s(1).type
                 % Use the built-in subsref for dot notation
